@@ -1,0 +1,31 @@
+version: 2026.232.0520
+plugin-cache:
+    candy:
+        version: 2026.248.0001
+        description: |-
+            The `charly cache` command — the git-ref cache operator surface, served as a
+            charly COMMAND-class plugin (dual-placement: compiled-in + external). On
+            `charly cache status|clear|refresh|bypass`, the plugin operates on the
+            git-ref cache DIRECTLY through spec/refs (the same per-host charly.yml
+            `cache:` section the core singleton uses — shared on-disk state). The
+            bypass (`charly cache bypass`) is PERSISTED in the cache: git: section via
+            refs.GitClient.SetBypass, so a fresh core process honors it at construction —
+            the plugin owns the whole operator surface; core keeps only the mechanism
+            (spec/refs) + the singleton. The command-class companion of the verb-class
+            plugin-example-external; the command class is external-capable: charly
+            prescans `cache` into the CLI grammar and dispatches it in-proc (compiled-in)
+            or fork/execs this binary (external).
+        plugin:
+            providers:
+                - command:cache
+            source: github.com/opencharly/plugin-cache/candy/plugin-cache
+        plan:
+            - # ADE check: a deterministic build-context check that does NOT depend on the
+              # project context the `charly cache` CLI needs (the prescan finds this candy
+              # from the project dir). It mirrors candy/plugin-example-command's pattern — a
+              # trivial build-context `plugin: command` (the built-in command CHECK verb)
+              # running `true`. The full CLI end-to-end (`charly cache status` → the
+              # cache path + entry count on stdout) is exercised by the Go e2e + the live R10.
+              check: the cache command plugin
+              plugin:
+                  command: true
