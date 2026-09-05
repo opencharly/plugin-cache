@@ -1,4 +1,4 @@
-version: 2026.232.0520
+version: 2026.240.1943
 plugin-cache:
     candy:
         version: 2026.248.0001
@@ -23,9 +23,11 @@ plugin-cache:
             - # ADE check: a deterministic build-context check that does NOT depend on the
               # project context the `charly cache` CLI needs (the prescan finds this candy
               # from the project dir). It mirrors candy/plugin-example-command's pattern — a
-              # trivial build-context `plugin: command` (the built-in command CHECK verb)
-              # running `true`. The full CLI end-to-end (`charly cache status` → the
-              # cache path + entry count on stdout) is exercised by the Go e2e + the live R10.
-              check: the cache command plugin
-              plugin:
-                  command: true
+              # trivial build-context `command: true` check. The full CLI end-to-end
+              # (`charly cache status` → the cache path + entry count on stdout) is exercised
+              # by the Go e2e + the live R10.
+              check: the cache command plugin ships a buildable Go module (go.mod + the provider main) the host can build + fork/exec; the full `charly cache` end-to-end is exercised by the Go e2e + the live R10
+              id: cache-module-present
+              context:
+                - build
+              command: "true"
