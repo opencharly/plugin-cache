@@ -31,3 +31,48 @@ plugin-cache:
               context:
                 - build
               command: "true"
+
+cache-skill:
+    skill:
+        name: cache
+        family: cache
+        owner: plugin-cache
+        description: |-
+            The `charly cache` git-ref cache operator surface — status, clear, refresh, bypass.
+            Use before debugging stale @github ref resolution, a pin that will not advance, or
+            a network-fetch that keeps returning an old answer.
+        triggers:
+            - "`charly cache` / git-ref cache / stale @github ref resolution / pinned ref won't advance"
+        content: |
+            # charly cache — the git-ref cache operator surface
+
+            `charly cache` manages the git-ref cache: the store of resolved `@github` refs charly
+            keeps so repeated resolutions do not re-fetch. It is served by `candy/plugin-cache`
+            (a `command:cache` plugin, dual-placement compiled-in + external).
+
+            ## Command tree
+
+            - `charly cache status` — the cache file path + entry count.
+            - `charly cache clear` — drop every cached git answer; the next resolutions are fresh.
+            - `charly cache refresh` — drop the cache and note the next resolution re-warms the refs.
+            - `charly cache bypass` — persist the bypass; every resolution is fresh until turned off.
+            - `charly cache bypass --off` — turn the bypass off; the cache resumes.
+
+            ## Where the cache lives
+
+            The cache is the `cache:` section of the per-host `charly.yml`
+            (`~/.config/charly/charly.yml`) — shared on-disk state. The plugin operates on it
+            DIRECTLY through `spec/refs`, so a plugin process reads and writes the SAME cache the
+            core singleton uses. The bypass is persisted in the cache's `git:` section via
+            `refs.GitClient.SetBypass`, so a fresh core process honors it at construction.
+
+            ## When to use it
+
+            Reach for `charly cache status` first when a `@github` resolution looks stale; use
+            `charly cache clear`/`refresh` to force fresh resolution, and `bypass` when every
+            resolution must hit the network (e.g. debugging a remote branch that advanced).
+
+            ## Cross-References
+
+            - `/charly-internals:git-workflow` — pin discipline and merged-ref-only pins.
+            - `/charly-internals:plugin` — the command-plugin class and providers.
