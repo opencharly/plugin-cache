@@ -38,13 +38,16 @@ plugin-cache:
               context:
                 - build
               command: "true"
-            - # ADE check: the OCI-transport surface parses (push/pull leaves in the
-              # grammar) and its reverse-channel guard is deterministic (cache_oci_test.go).
-              check: the `charly cache push`/`pull` OCI-transport leaves are present in the command grammar and their reverse-channel guard is locked by cache_oci_test.go
+            - # ADE check: the OCI-transport surface is present in the COMPILED charly
+              # binary — a runtime-context `charly cache push --help` must exit 0 (the
+              # plugin-agent precedent for asserting a command tree). The live registry
+              # round-trip (push -> pull -> byte-identical read) is proven separately.
+              check: the `charly cache push`/`pull` OCI-transport leaves are present in the compiled binary's command grammar (`charly cache push --help` exits 0)
               id: cache-oci-surface-present
               context:
-                - build
-              command: "true"
+                - runtime
+              command: charly cache push --help
+              exit_status: 0
 
 cache-skill:
     skill:
