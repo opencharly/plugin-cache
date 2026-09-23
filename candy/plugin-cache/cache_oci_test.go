@@ -2,9 +2,14 @@ package cache
 
 import (
 	"context"
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/opencharly/sdk"
+	"github.com/opencharly/spec/spec"
 )
 
 // cache_oci_test.go — the `charly cache push/pull` OCI surface. The push/pull
@@ -24,15 +29,17 @@ func TestTransferCacheRequiresReverseChannel(t *testing.T) {
 }
 
 // TestCachePushRejectsMissingLayout proves a push of a named cache with no local
-// layout fails before dispatching (so the operator gets a clear "nothing to
-// push" rather than a transport error).
+// layout fails BEFORE dispatching, via the StoreDir-existence guard (not the
+// reverse-channel guard): a non-nil executor lets transferCache reach os.Stat,
+// where the missing layout is caught with a clear "nothing to push".
 func TestCachePushRejectsMissingLayout(t *testing.T) {
 	t.Setenv("CHARLY_CACHE_DIR", t.TempDir())
-	// exec is set but the named cache dir has no layout; the StoreDir-existence
-	// guard must reject before any InvokeProvider call (which would nil-panic).
-	err := transferCache(&CacheCmd{ctx: context.Background(), exec: nil}, "cache-push", "no-such-cache", "localhost:5000/x:y", true)
+	err := transferCache(&CacheCmd{ctx: context.Background(), exec: &sdk.Executor{}}, "cache-push", "no-such-cache", "localhost:5000/x:y", true)
 	if err == nil {
 		t.Fatal("pushing a named cache with no local layout must fail")
+	}
+	if !strings.Contains(err.Error(), "no local layout") {
+		t.Fatalf("expected the missing-layout guard to fire, got: %v", err)
 	}
 }
 
@@ -47,5 +54,37 @@ func TestCacheCommandTreeHasOCISurface(t *testing.T) {
 		if _, err := sdk.ParseInProcCLI("cache", cli, args); err != nil {
 			t.Fatalf("`charly cache %v` must parse: %v", args, err)
 		}
+	}
+}
+
+// TestTransferCacheSuccessPath drives the full SUCCESS path with an injected
+// dispatch seam: it resolves the layout dir, builds the spec.CacheTransferRequest
+// envelope (asserting the fields), receives a spec.CacheTransferReply, and
+// decodes it — the changed behaviour a broken success path would fail.
+func TestTransferCacheSuccessPath(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("CHARLY_CACHE_DIR", root)
+	// The push guard requires the layout dir to exist.
+	if err := os.MkdirAll(filepath.Join(root, "materialized"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	var gotBody []byte
+	var gotEnv []byte
+	invoke := func(_ context.Context, body, envJSON []byte) ([]byte, error) {
+		gotBody, gotEnv = body, envJSON
+		return json.Marshal(spec.CacheTransferReply{Digest: "sha256:abc", Entries: 3, Ref: "reg/x:tag"})
+	}
+	if err := transferCacheWith(invoke, "cache-push", "materialized", "reg/x:tag", true); err != nil {
+		t.Fatalf("success path: %v", err)
+	}
+	var req spec.CacheTransferRequest
+	if err := json.Unmarshal(gotBody, &req); err != nil {
+		t.Fatalf("request not a spec.CacheTransferRequest: %v", err)
+	}
+	if req.Dir != filepath.Join(root, "materialized") || req.Ref != "reg/x:tag" || !req.Insecure {
+		t.Fatalf("request envelope = %+v (want dir=%s ref=reg/x:tag insecure)", req, filepath.Join(root, "materialized"))
+	}
+	if string(gotEnv) != `{"oci_op":"cache-push"}` {
+		t.Fatalf("env = %s, want the cache-push discriminator", gotEnv)
 	}
 }

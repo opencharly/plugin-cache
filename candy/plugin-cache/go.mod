@@ -4,7 +4,7 @@ go 1.26.4
 
 require (
 	github.com/opencharly/sdk v0.2026266.1111
-	github.com/opencharly/spec v0.2026266.1044
+	github.com/opencharly/spec v0.2026266.1306
 )
 
 require (
