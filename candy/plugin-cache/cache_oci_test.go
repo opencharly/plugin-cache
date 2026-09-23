@@ -9,7 +9,9 @@ import (
 	"testing"
 
 	"github.com/opencharly/sdk"
+	pb "github.com/opencharly/spec/proto"
 	"github.com/opencharly/spec/spec"
+	"google.golang.org/grpc"
 )
 
 // cache_oci_test.go — the `charly cache push/pull` OCI surface. The push/pull
@@ -86,5 +88,44 @@ func TestTransferCacheSuccessPath(t *testing.T) {
 	}
 	if string(gotEnv) != `{"oci_op":"cache-push"}` {
 		t.Fatalf("env = %s, want the cache-push discriminator", gotEnv)
+	}
+}
+
+// stubExecClient is a pb.ExecutorServiceClient whose InvokeProvider returns a
+// canned reply; the embedded nil interface satisfies the other methods (never
+// called here). It lets a test drive the REAL dispatch — ctx → ExecutorForInvoke
+// → Executor.InvokeProvider — with no stub at the transferCache seam.
+type stubExecClient struct {
+	pb.ExecutorServiceClient
+	gotClass, gotWord, gotOp string
+	reply                    []byte
+}
+
+func (s *stubExecClient) InvokeProvider(_ context.Context, in *pb.InvokeProviderRequest, _ ...grpc.CallOption) (*pb.InvokeReply, error) {
+	s.gotClass, s.gotWord, s.gotOp = in.GetClass(), in.GetReserved(), in.GetOp()
+	return &pb.InvokeReply{ResultJson: s.reply}, nil
+}
+
+// TestTransferCacheRealDispatch drives the REAL reverse-channel dispatch: an
+// in-proc Executor built from a stub client is threaded on ctx (the compiled-in
+// placement's path), transferCache resolves it via ExecutorForInvoke, and the
+// real Executor.InvokeProvider("verb","oci",OpRun,…) runs — proving the shipped
+// dispatch (not a transferCacheWith stub) carries the envelope to verb:oci.
+func TestTransferCacheRealDispatch(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("CHARLY_CACHE_DIR", root)
+	if err := os.MkdirAll(filepath.Join(root, "materialized"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	reply, _ := json.Marshal(spec.CacheTransferReply{Digest: "sha256:real", Entries: 2, Ref: "reg/x:tag"})
+	client := &stubExecClient{reply: reply}
+	ex := sdk.NewInProcExecutor(client)
+
+	cmd := &CacheCmd{ctx: sdk.ContextWithExecutor(context.Background(), ex), exec: ex}
+	if err := transferCache(cmd, "cache-push", "materialized", "reg/x:tag", true); err != nil {
+		t.Fatalf("real dispatch: %v", err)
+	}
+	if client.gotClass != "verb" || client.gotWord != "oci" || client.gotOp != sdk.OpRun {
+		t.Fatalf("dispatch reached (%q,%q,%q), want (verb,oci,%s)", client.gotClass, client.gotWord, client.gotOp, sdk.OpRun)
 	}
 }
