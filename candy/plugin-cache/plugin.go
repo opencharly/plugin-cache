@@ -44,9 +44,11 @@ func NewMeta() pb.PluginMetaServer {
 }
 
 // CliMain is the OUT-OF-PROCESS CLI-mode entry (charly fork/execs the binary with the
-// pass-through tokens after `charly cache`). It runs the SAME effect as the in-proc Invoke(OpRun) path.
+// pass-through tokens after `charly cache`). It runs the SAME effect as the in-proc
+// Invoke(OpRun) path, minus the reverse channel (so the OCI push/pull leaves report
+// that they need the compiled-in placement).
 func CliMain(args []string) int {
-	if err := runCacheCLI(args); err != nil {
+	if err := runCacheCLI(context.Background(), nil, args); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
@@ -57,8 +59,10 @@ type provider struct{ pb.UnimplementedProviderServer }
 
 // Invoke handles OpRun for the COMPILED-IN (in-proc) dispatch: decode the pass-through
 // {args} and run the command effect in charly's own process. (Out-of-process dispatch
-// is fork/exec → CliMain, never this gRPC path.)
-func (provider) Invoke(_ context.Context, req *pb.InvokeRequest) (*pb.InvokeReply, error) {
+// is fork/exec → CliMain, never this gRPC path.) The reverse-channel executor is
+// recovered from ctx so the OCI surface (push/pull) can reach verb:oci — the transport
+// lives in candy/plugin-oci, never in core nor here.
+func (provider) Invoke(ctx context.Context, req *pb.InvokeRequest) (*pb.InvokeReply, error) {
 	if req.GetOp() != sdk.OpRun {
 		return nil, fmt.Errorf("cache: unsupported op %q (only %q)", req.GetOp(), sdk.OpRun)
 	}
@@ -70,18 +74,32 @@ func (provider) Invoke(_ context.Context, req *pb.InvokeRequest) (*pb.InvokeRepl
 			return nil, fmt.Errorf("cache: decode args: %w", err)
 		}
 	}
-	if err := runCacheCLI(in.Args); err != nil {
+	exec, err := sdk.ExecutorForInvoke(ctx, req.GetExecutorBrokerId())
+	if err != nil {
+		// The git-ref leaves need no executor; the OCI leaves do. Degrade to nil so
+		// the git-ref surface still works if the reverse channel is absent, and let
+		// the OCI leaves report the missing channel.
+		exec = nil
+	}
+	if err := runCacheCLI(ctx, exec, in.Args); err != nil {
 		return nil, err
 	}
 	return &pb.InvokeReply{}, nil
 }
 
-// CacheCmd is the `charly cache` CLI tree — the git-ref cache operator surface.
+// CacheCmd is the `charly cache` CLI tree — the git-ref cache operator surface
+// plus the OCI-transport surface for a named ArtifactStore cache. The unexported
+// ctx/exec are the host reverse channel the OCI leaves use (kong ignores them).
 type CacheCmd struct {
+	ctx  context.Context
+	exec *sdk.Executor
+
 	Status  CacheStatusCmd  `cmd:"" help:"Show the git-ref cache (path, entry count, bypass state)"`
 	Clear   CacheClearCmd   `cmd:"" help:"Drop every cached git answer — the next resolutions are fresh"`
 	Refresh CacheRefreshCmd `cmd:"" help:"Drop the cache and note the next resolution re-warms the refs"`
 	Bypass  CacheBypassCmd  `cmd:"" help:"Persist the bypass — every resolution is fresh until turned off"`
+	Push    CachePushCmd    `cmd:"" help:"Push a named cache (an OCI layout) to a registry"`
+	Pull    CachePullCmd    `cmd:"" help:"Pull a named cache from a registry into its local OCI layout"`
 }
 
 // CacheStatusCmd reports the cache file path + entry count.
@@ -136,8 +154,10 @@ func (c CacheBypassCmd) Run() error {
 }
 
 // runCacheCLI is the command's ONE effect, shared by both placements: kong-parse the
-// pass-through args into the CacheCmd tree and run the selected leaf.
-func runCacheCLI(args []string) error {
-	var cli CacheCmd
-	return sdk.RunInProcCLI("cache", &cli, args)
+// pass-through args into the CacheCmd tree and run the selected leaf. exec is the
+// reverse-channel executor (nil in the out-of-process CliMain path, where the OCI
+// leaves report the missing channel).
+func runCacheCLI(ctx context.Context, exec *sdk.Executor, args []string) error {
+	cli := &CacheCmd{ctx: ctx, exec: exec}
+	return sdk.RunInProcCLI("cache", cli, args)
 }
