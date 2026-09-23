@@ -15,6 +15,13 @@ plugin-cache:
             plugin-example-external; the command class is external-capable: charly
             prescans `cache` into the CLI grammar and dispatches it in-proc (compiled-in)
             or fork/execs this binary (external).
+
+            The OCI-transport surface (`charly cache push <name> <ref>` / `pull`) moves
+            a named spec/cache.ArtifactStore (an OCI Image Layout) to and from a
+            registry, reaching candy/plugin-oci's verb:oci cache-push/cache-pull over
+            the F10 peer-dispatch leg — the go-containerregistry transport stays
+            single-homed in plugin-oci, never linked here. Needs the compiled-in
+            placement (the reverse channel).
         plugin:
             providers:
                 - command:cache
@@ -31,6 +38,16 @@ plugin-cache:
               context:
                 - build
               command: "true"
+            - # ADE check: the OCI-transport surface is present in the COMPILED charly
+              # binary — a runtime-context `charly cache push --help` must exit 0 (the
+              # plugin-agent precedent for asserting a command tree). The live registry
+              # round-trip (push -> pull -> byte-identical read) is proven separately.
+              check: the `charly cache push`/`pull` OCI-transport leaves are present in the compiled binary's command grammar (`charly cache push --help` exits 0)
+              id: cache-oci-surface-present
+              context:
+                - runtime
+              command: charly cache push --help
+              exit_status: 0
 
 cache-skill:
     skill:
