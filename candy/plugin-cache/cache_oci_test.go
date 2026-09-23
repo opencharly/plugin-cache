@@ -74,7 +74,7 @@ func TestTransferCacheSuccessPath(t *testing.T) {
 		gotBody, gotEnv = body, envJSON
 		return json.Marshal(spec.CacheTransferReply{Digest: "sha256:abc", Entries: 3, Ref: "reg/x:tag"})
 	}
-	if err := transferCacheWith(invoke, "cache-push", "materialized", "reg/x:tag", true); err != nil {
+	if err := transferCacheWith(context.Background(), invoke, "cache-push", "materialized", "reg/x:tag", true); err != nil {
 		t.Fatalf("success path: %v", err)
 	}
 	var req spec.CacheTransferRequest

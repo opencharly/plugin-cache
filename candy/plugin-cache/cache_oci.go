@@ -53,21 +53,27 @@ func (c CachePullCmd) Run(ctx *CacheCmd) error {
 type cacheInvokeFn func(ctx context.Context, body, envJSON []byte) ([]byte, error)
 
 // transferCache resolves the named cache's layout dir and dispatches the op to
-// verb:oci over the reverse channel.
+// verb:oci over the reverse channel. It threads the command's ctx (from the host
+// Invoke) into the peer dispatch so the call honors host cancellation.
 func transferCache(parent *CacheCmd, op, name, ref string, insecure bool) error {
 	if parent == nil || parent.exec == nil {
 		return fmt.Errorf("charly cache %s requires the compiled-in placement (no reverse channel to reach verb:oci)", op)
 	}
+	baseCtx := parent.ctx
+	if baseCtx == nil {
+		baseCtx = context.Background()
+	}
 	invoke := func(ctx context.Context, body, envJSON []byte) ([]byte, error) {
 		return parent.exec.InvokeProvider(ctx, "verb", "oci", sdk.OpRun, body, envJSON, sdk.InvokeProviderOpts{})
 	}
-	return transferCacheWith(invoke, op, name, ref, insecure)
+	return transferCacheWith(baseCtx, invoke, op, name, ref, insecure)
 }
 
 // transferCacheWith is the testable core of transferCache: it resolves the
 // layout dir, builds the spec.CacheTransferRequest envelope, dispatches over the
-// injected seam, decodes the spec.CacheTransferReply, and prints the summary.
-func transferCacheWith(invoke cacheInvokeFn, op, name, ref string, insecure bool) error {
+// injected seam with ctx, decodes the spec.CacheTransferReply, and prints the
+// summary.
+func transferCacheWith(ctx context.Context, invoke cacheInvokeFn, op, name, ref string, insecure bool) error {
 	dir, err := cache.StoreDir(name)
 	if err != nil {
 		return fmt.Errorf("resolve cache %q dir: %w", name, err)
@@ -86,7 +92,7 @@ func transferCacheWith(invoke cacheInvokeFn, op, name, ref string, insecure bool
 	if err != nil {
 		return err
 	}
-	resJSON, err := invoke(context.Background(), body, envJSON)
+	resJSON, err := invoke(ctx, body, envJSON)
 	if err != nil {
 		return fmt.Errorf("cache %s: %w", op, err)
 	}
