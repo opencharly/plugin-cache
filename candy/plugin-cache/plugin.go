@@ -18,6 +18,7 @@ package cache
 
 import (
 	"context"
+	"embed"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -27,6 +28,9 @@ import (
 	"github.com/opencharly/spec/refs"
 )
 
+//go:embed schema/*.cue
+var schemaFS embed.FS
+
 const calver = "2026.248.0001"
 
 // NewProvider returns the command provider for in-proc registration (compiled-in) or out-of-proc serving.
@@ -34,13 +38,15 @@ func NewProvider() pb.ProviderServer { return &provider{} }
 
 // NewMeta advertises command:cache via sdk.NewMeta → BuildCapabilities so the
 // COMPILED-IN path registers it as a command provider (buildUnitInProc → inprocProvider
-// Class=command; the host builds its dynamic Kong grammar + dispatches Invoke(OpRun)).
-// The served schema carries no #*Input def — a command's args are pass-through CLI
-// tokens, not a structured plugin_input — so the capability has no InputDef.
+// Class=command; the host builds its dynamic Kong grammar + dispatches Invoke(OpRun)) —
+// together with this plugin's OWN self-contained CUE schema (schema/cache.cue) served over
+// Describe. There is NO schema-less plugin: the served schema documents the command contract
+// even though a command's args are pass-through CLI tokens, not a structured plugin_input (so
+// the capability has no InputDef).
 func NewMeta() pb.PluginMetaServer {
 	return sdk.NewMeta(calver,
 		[]sdk.ProvidedCapability{{Class: "command", Word: "cache"}},
-		nil)
+		schemaFS)
 }
 
 // CliMain is the OUT-OF-PROCESS CLI-mode entry (charly fork/execs the binary with the
