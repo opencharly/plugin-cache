@@ -1,7 +1,5 @@
-version: 2026.240.1943
 plugin-cache:
     candy:
-        version: 2026.248.0001
         description: |-
             The `charly cache` command — the git-ref cache operator surface, served as a
             charly COMMAND-class plugin (dual-placement: compiled-in + external). On
