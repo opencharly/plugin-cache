@@ -118,12 +118,33 @@ func (c CacheStatusCmd) Run() error {
 	return nil
 }
 
-// CacheClearCmd drops every cached git answer (in-memory + the persisted file).
+// clearRepoCache removes the ON-DISK remote-repo cache (~/.cache/charly/repos + every
+// <repo>.view.<schema-identity>), not merely the ref answer index. Without this, `charly
+// cache clear` left the fetched repo TREES in place, so a stale candy whose manifest uses
+// a retired schema shape (e.g. the pre-SDD `version:` form) was still read by the next
+// scan/validate and false-reddened it (opencharly/charly#804). A stale fetched candy must
+// not survive a clear.
+func clearRepoCache() error {
+	dir, err := refs.RepoCacheDir()
+	if err != nil {
+		return err
+	}
+	if _, err := os.Stat(dir); os.IsNotExist(err) {
+		return nil
+	}
+	return os.RemoveAll(dir)
+}
+
+// CacheClearCmd drops every cached git answer (in-memory + the persisted file) AND the
+// on-disk fetched-repo cache.
 type CacheClearCmd struct{}
 
 func (c CacheClearCmd) Run() error {
 	if err := refs.NewGitClient("").ClearCache(); err != nil {
 		return fmt.Errorf("clear cache: %w", err)
+	}
+	if err := clearRepoCache(); err != nil {
+		return fmt.Errorf("clear fetched-repo cache: %w", err)
 	}
 	fmt.Println("git-ref cache cleared — the next resolution is fresh")
 	return nil
@@ -135,6 +156,9 @@ type CacheRefreshCmd struct{}
 func (c CacheRefreshCmd) Run() error {
 	if err := refs.NewGitClient("").ClearCache(); err != nil {
 		return fmt.Errorf("refresh cache: %w", err)
+	}
+	if err := clearRepoCache(); err != nil {
+		return fmt.Errorf("refresh fetched-repo cache: %w", err)
 	}
 	fmt.Println("git-ref cache dropped — the next resolution re-warms the refs")
 	return nil
