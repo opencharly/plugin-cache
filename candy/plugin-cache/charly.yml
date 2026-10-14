@@ -20,6 +20,16 @@ plugin-cache:
             the F10 peer-dispatch leg — the go-containerregistry transport stays
             single-homed in plugin-oci, never linked here. Needs the compiled-in
             placement (the reverse channel).
+
+            `charly cache ingest <ref>` is the registry's WRITE half (charly#892): it
+            fetches ONE remote ref through the same route and lands it in a named
+            sdk/storekit store keyed by that ref — every blob content-addressed by
+            digest, then the keyed entry (repo/tag and the D-STORE-5 resolution record
+            in its annotations) LAST — so candy/plugin-registry's read-only server
+            serves exactly what charly ingested. The store is the reserved `registry`
+            name under the CACHE root (~/.cache/charly/registry, storekit's resolver),
+            not spec/cache's config root. This is the ONE ingest route: `charly
+            registry cache add` in opencharly/charly-registry is deleted with it (R2).
         plugin:
             providers:
                 - command:cache
@@ -45,6 +55,16 @@ plugin-cache:
               context:
                 - runtime
               command: charly cache push --help
+              exit_status: 0
+            - # ADE check: the registry INGEST leaf is present in the COMPILED charly
+              # binary — a runtime-context `charly cache ingest --help` must exit 0. The
+              # live ingest (fetch -> store -> keyed entry, with the D-STORE-5 halves) is
+              # proven by the Go tests and by the live run recorded on the PR.
+              check: the `charly cache ingest` leaf is present in the compiled binary's command grammar (`charly cache ingest --help` exits 0)
+              id: cache-registry-ingest-present
+              context:
+                - runtime
+              command: charly cache ingest --help
               exit_status: 0
 
 cache-skill:
@@ -72,6 +92,28 @@ cache-skill:
             - `charly cache refresh` — drop the cache and note the next resolution re-warms the refs.
             - `charly cache bypass` — persist the bypass; every resolution is fresh until turned off.
             - `charly cache bypass --off` — turn the bypass off; the cache resumes.
+            - `charly cache push <name> <ref>` — push a named cache (an OCI layout) to a registry.
+            - `charly cache pull <name> <ref>` — pull a named cache from a registry into its local layout.
+            - `charly cache ingest <ref>` — ingest a remote image ref into a named store (the reserved
+              `registry` store by default), so charly's own registry can serve it. `--store <name>`
+              chooses the store, `--insecure` allows a plain-HTTP dev registry, `--refresh` re-resolves
+              even when the ref is already stored.
+
+            ## Ingesting into the registry store
+
+            `charly cache ingest <ref>` is the write half of the registry capability. It resolves the
+            ref's artifacts through `verb:oci` (the go-containerregistry transport stays single-homed in
+            plugin-oci) and lands them in a named `sdk/storekit` store: every blob is written
+            content-addressed by digest, then ONE entry keyed by the full ref — with the repo, the tag
+            and the digest the tag resolved to in its annotations (D-STORE-5). A mutable name therefore
+            resolves ONCE: a repeated `charly cache ingest <ref>` is answered by the store with no second
+            fetch, and a re-run at an unchanged digest writes no second blob (`--refresh` forces the
+            re-resolution, not a rewrite). It needs the compiled-in placement, because the reverse
+            channel to `verb:oci` exists only there.
+
+            The reserved store is `registry`, under the CACHE root: `~/.cache/charly/registry`
+            (`CHARLY_CACHE_DIR` overrides the root). That is `storekit`'s resolver — distinct from
+            `charly cache push`/`pull`'s config-rooted `~/.config/charly/cache/<name>` layouts.
 
             ## Where the cache lives
 

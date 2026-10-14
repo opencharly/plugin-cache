@@ -12,7 +12,7 @@ resolution looks stale; use `clear`/`refresh` to force fresh resolution, and
 
 | Capability | Surface |
 |---|---|
-| `command:cache` | the `charly cache` CLI — `status`, `clear`, `refresh`, `bypass`, plus the OCI-transport `push`/`pull` |
+| `command:cache` | the `charly cache` CLI — `status`, `clear`, `refresh`, `bypass`, plus the OCI-transport `push`/`pull` and the registry `ingest` |
 
 ## The command
 
@@ -24,6 +24,7 @@ charly cache bypass         # persist the bypass — every resolution is fresh u
 charly cache bypass --off   # turn the bypass off — the cache resumes
 charly cache push <name> <ref>   # push a named cache (an OCI layout) to a registry
 charly cache pull <name> <ref>   # pull a named cache into its local OCI layout
+charly cache ingest <ref>        # ingest a remote ref into a named store (the registry store by default)
 ```
 
 The cache is the `cache:` section of the per-host `charly.yml`

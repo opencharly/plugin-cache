@@ -106,6 +106,7 @@ type CacheCmd struct {
 	Bypass  CacheBypassCmd  `cmd:"" help:"Persist the bypass — every resolution is fresh until turned off"`
 	Push    CachePushCmd    `cmd:"" help:"Push a named cache (an OCI layout) to a registry"`
 	Pull    CachePullCmd    `cmd:"" help:"Pull a named cache from a registry into its local OCI layout"`
+	Ingest  CacheIngestCmd  `cmd:"" help:"Ingest a remote image ref into a named store (the registry store by default)"`
 }
 
 // CacheStatusCmd reports the cache file path + entry count.
