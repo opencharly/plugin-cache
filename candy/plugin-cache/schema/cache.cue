@@ -21,8 +21,10 @@
 	command: "cache"
 
 	// The subcommands of the `charly cache` CLI tree — the git-ref cache operator
-	// surface plus the OCI-transport push/pull leaves.
-	subcommands: ["status", "clear", "refresh", "bypass", "push", "pull"]
+	// surface plus the OCI-transport push/pull leaves and the registry INGEST leaf
+	// (`charly cache ingest <ref>`), which lands a remote image ref in a named
+	// sdk/storekit store keyed by that ref so the registry serving leg can serve it.
+	subcommands: ["status", "clear", "refresh", "bypass", "push", "pull", "ingest"]
 
 	// What the command does, in one line (the public-docs surface).
 	contract: string & !=""

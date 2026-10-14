@@ -9,3 +9,144 @@
 discover:
     - path: candy
       recursive: true
+
+# ---------------------------------------------------------------------------
+# THE R10 BED for the cache command surface.
+#
+# SHAPE (the charly-registry#10 precedent, which the team lead and the validator
+# both cite): a `kind:local` TEMPLATE that installs nothing (`candy: []` is
+# required there) and carries NO plan — measured there: a template's `plan:` is
+# not carried into the composed deploy, so the checks silently never run — plus a
+# `disposable: true` DEPLOY that composes it and carries the `plan:`.
+#
+# THE BINARY IS `${CHARLY_BIN}`, NEVER A BARE `charly`: a bare word resolves from
+# the step's PATH and can measure a STALE install — a step that runs something,
+# but not the thing under test (R9). `${CHARLY_BIN}` is stamped by the check
+# runtime's var resolver with the ACTIVE binary, so the run measures the tree
+# under review (the plugin composed in, or the local build).
+#
+# `context: [runtime]` is required: a bed's own `run:` step is verify-only, so
+# every mutation lives in a `check:` step.
+#
+# WHAT THE UPSTREAM IS, AND WHY: a PINNED PUBLIC registry ref (R8-live — a real
+# service, never a mock), because it needs no hand-started fixture (R3) and this
+# repo owns no service infrastructure to compose one. What a public upstream
+# cannot do is be STOPPED, so D-STORE-5's "no second fetch" arm here rides the
+# store's own HIT path PLUS a LOUD-FAILURE CONTROL against a deliberately
+# unreachable ref (which proves the fetch path is really attempted, so a store hit
+# is what the repeat arm measured); the stronger stopped-upstream arm is the live
+# venue evidence in the PR body. Composing the fixture in-bed — which makes that
+# arm available here — is recorded as the COMPLETION of this bed in
+# opencharly/plugin-cache#10.
+# ---------------------------------------------------------------------------
+cache-cmd-check:
+    local:
+        description: |-
+            Minimal kind:local template for the cache-ingest bed: installs nothing
+            (`candy: []` is required on a kind:local template) and carries no plan —
+            the checks live on the deploy that composes it.
+        candy: []
+
+check-cache-ingest:
+    local:
+        from: cache-cmd-check
+        host: local
+        disposable: true
+        lifecycle: test
+        plan:
+            - check: the `charly cache ingest` leaf is present in the ACTIVE binary's command grammar
+              id: ci-leaf-present
+              context: [runtime]
+              timeout: 120s
+              exit_status: 0
+              command:
+                in_container: false
+                command: |
+                    set -eu
+                    echo "the binary under test is ${CHARLY_BIN}"
+                    ${CHARLY_BIN} version | tail -1
+                    ${CHARLY_BIN} cache ingest --help >/dev/null
+                    echo "the ingest leaf resolves in ${CHARLY_BIN}"
+            - check: >-
+                  the ingest lands a real public registry image's index in the named `registry` store keyed by the
+                  ref, the stored manifest hashes to the digest the entry records, and the store holds ONE copy of
+                  the content across a repeat (no second fetch) and a --refresh (no second write)
+              id: ci-ingest-live
+              context: [runtime]
+              timeout: 900s
+              exit_status: 0
+              stdout:
+                contains: CACHE-INGEST-OK
+              command:
+                in_container: false
+                command: |
+                    set -eu
+                    REF="docker.io/library/alpine:3.20"
+                    # A hermetic cache root AND runtime root: the store's index lock lives under the
+                    # runtime root, so leaving it shared would touch host state.
+                    CACHE=$(mktemp -d); RUNTIME=$(mktemp -d)
+                    # The evidence is RETAINED, not left in a temp dir: a step's stdout is not kept
+                    # by the runner, so a log under mktemp dies with the step and leaves the numbers
+                    # unreproducible (the lesson this programme learned the hard way).
+                    LOG="$PWD/.check/cache-ingest.log"; mkdir -p "$(dirname "$LOG")"
+                    export CHARLY_CACHE_DIR="$CACHE" XDG_RUNTIME_DIR="$RUNTIME"
+                    # ${CHARLY_BIN} is the RUNNER's substitution, so it must be spelled with braces
+                    # here: the unbraced form is left for the shell and is unbound (measured).
+                    run_arms() {
+                    blobs() { find "$CACHE/registry/blobs" -type f | wc -l; }
+                    log() { echo "== $*"; }
+                    log "the binary under test is ${CHARLY_BIN}"
+                    log "store root = $CACHE/registry  (a temp root; CHARLY_CACHE_DIR is the one override)"
+                    log "ARM 1: the ingest fetches $REF from a real public registry"
+                    ${CHARLY_BIN} cache ingest "$REF" 2>&1 | grep -Ev '^(WARNING|plugin )'
+                    FIRST=$(blobs)
+                    log "blob count after the first ingest = $FIRST   (find <store>/blobs -type f | wc -l)"
+                    python3 - "$CACHE/registry" "$REF" <<'PYEOF'
+                    import json, hashlib, os, sys
+                    store, ref = sys.argv[1], sys.argv[2]
+                    idx = json.load(open(os.path.join(store, "index.json")))
+                    keys = [m["annotations"]["ai.opencharly.cache.key"] for m in idx["manifests"]]
+                    assert ref in keys, "the ref must be keyed in the store, got %r" % keys
+                    desc = [m for m in idx["manifests"] if m["annotations"]["ai.opencharly.cache.key"] == ref][0]
+                    entry = json.load(open(os.path.join(store, "blobs", "sha256", desc["digest"].split(":")[1])))
+                    ann = entry["annotations"]
+                    assert ann["ai.opencharly.registry.repo"] == "docker.io/library/alpine", ann
+                    assert ann["ai.opencharly.registry.tag"] == "3.20", ann
+                    assert ann["ai.opencharly.registry.resolved"] == entry["payload"], ann
+                    blob = os.path.join(store, "blobs", "sha256", entry["payload"].split(":")[1])
+                    got = "sha256:" + hashlib.sha256(open(blob, "rb").read()).hexdigest()
+                    assert got == entry["payload"], "the stored manifest does not hash to its own digest: %s != %s" % (got, entry["payload"])
+                    print("the entry is keyed by the full ref, carries repo/tag/resolved, and its payload hashes to %s" % got)
+                    PYEOF
+                    log "ARM 2 (D-STORE-5 half 1): the SAME ref again is answered by the store, not the network"
+                    OUT=$(${CHARLY_BIN} cache ingest "$REF" 2>&1 | grep -Ev '^(WARNING|plugin )')
+                    echo "$OUT"
+                    echo "$OUT" | grep -q 'no fetch' || { echo "the repeat did not report a store hit"; exit 1; }
+                    SECOND=$(blobs)
+                    log "blob count after the repeat = $SECOND"
+                    [ "$FIRST" = "$SECOND" ] || { echo "the repeat changed the blob count: $FIRST -> $SECOND"; exit 1; }
+                    log "CONTROL: a NEW ref at an unreachable address MUST fail loudly, so the arm above cannot have fetched silently"
+                    if ${CHARLY_BIN} cache ingest 127.0.0.1:1/x/y:v1 --insecure >/dev/null 2>&1; then
+                        echo "the unreachable ref did NOT fail - the fetch path is not really attempted"; exit 1
+                    fi
+                    log "the control failed loudly, as it must"
+                    AFTER_CONTROL=$(blobs)
+                    [ "$FIRST" = "$AFTER_CONTROL" ] || { echo "the failed control changed the store: $FIRST -> $AFTER_CONTROL"; exit 1; }
+                    log "ARM 3 (D-STORE-5 half 2): --refresh re-resolves and writes no second blob"
+                    ${CHARLY_BIN} cache ingest "$REF" --refresh 2>&1 | grep -Ev '^(WARNING|plugin )'
+                    THIRD=$(blobs)
+                    log "blob count after --refresh = $THIRD"
+                    [ "$FIRST" = "$THIRD" ] || { echo "the refresh rewrote blobs: $FIRST -> $THIRD"; exit 1; }
+                    log "BLOB COUNT UNCHANGED across ingest / repeat / control / refresh = $FIRST"
+                    }
+                    # The step's exit status must be the ARMS' status, never a pipeline's: `arms | tee`
+                    # returns tee's status, so a failing arm would report PASS (measured — the first run
+                    # of this bed was green with `sh: CHARLY_BIN: unbound variable` in its own log).
+                    # Write the log from the arms, then assert the arm markers, then print it.
+                    rm -rf "$CACHE" "$RUNTIME"
+                    if run_arms >"$LOG" 2>&1; then :; else rc=$?; cat "$LOG"; exit $rc; fi
+                    for marker in "ARM 1: the ingest fetches" "the entry is keyed by the full ref" "ARM 2 (D-STORE-5 half 1)" "the control failed loudly" "ARM 3 (D-STORE-5 half 2)" "BLOB COUNT UNCHANGED"; do
+                        grep -q -- "$marker" "$LOG" || { echo "the arm marker did not reach the log: $marker"; cat "$LOG"; exit 1; }
+                    done
+                    cat "$LOG"
+                    echo CACHE-INGEST-OK
